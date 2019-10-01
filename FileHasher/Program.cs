@@ -42,20 +42,31 @@ namespace FileHasher
             Exception
         }
 
-        static string RootFolderPath { get; set; } = ProgramBaseDirectory;
-        static string CsvFilePath => $"{RootFolderPath}\\{Path.GetFileName(RootFolderPath)}.csv";
-        static string LogFilePath => $"{RootFolderPath}\\Output.log";
-        static string[] FileExtensions { get; set; } = new string[] { ".mp3", ".wav", ".ogg", ".mp4" };
+        static string RootFolderPath { get; set; } = $"{ProgramBaseDirectory}Test";
+        static string CsvFilePath => $"{ProgramBaseDirectory}Hashes.csv";
+        static string LogFilePath => $"{ProgramBaseDirectory}Output.log";
+        static string CsvFileLastHashPath => $"{ProgramBaseDirectory}last_hash";
+        static string[] FileExtensions { get; set; } = new string[] { ".txt", ".log" };
         static string LogTimestampFormat => "yyyy-MM-dd HH:mm:ss.fff";
         static List<string> LogBufer { get; } = new List<string>();
         static bool WaitBeforeExit { get; set; } = false;
+        static bool FolderCleanupRequired { get; set; } = false;
 
         static void Main(string[] args)
         {
-            ConsolePrint(ProgramHeader);
-
             try
             {
+                // parse args
+                if (args.Length == 1 && args[0].Equals("/?"))
+                {
+                    Console.WriteLine(ProgramHeader);
+                    Console.WriteLine("Program usage:");
+                    Console.WriteLine($"  {ProgramName} [{nameof(RootFolderPath)}] [{nameof(FileExtensions)}] [-wait|-nowait] [-clean|-noclean]");
+                    return;
+                }
+
+                ConsolePrint(ProgramHeader);
+
                 if (args.Length >= 1) { RootFolderPath = Path.GetFullPath(args[0]); }
 
                 if (args.Length >= 2) { FileExtensions = args[1].Split(','); }
@@ -63,7 +74,20 @@ namespace FileHasher
                 if (args.Length >= 3)
                 {
                     if (args[2].Equals("-wait")) { WaitBeforeExit = true; }
+                    else { WaitBeforeExit = false; }
                 }
+
+                if (args.Length >= 4)
+                {
+                    if (args[3].Equals("-clean")) { FolderCleanupRequired = true; }
+                    else { FolderCleanupRequired = false; }
+                }
+
+                // print args
+                ConsolePrint($"{nameof(RootFolderPath)}={RootFolderPath}");
+                ConsolePrint($"{nameof(FileExtensions)}={string.Join(",", FileExtensions)}");
+                ConsolePrint($"{nameof(WaitBeforeExit)}={WaitBeforeExit}");
+                ConsolePrint($"{nameof(FolderCleanupRequired)}={FolderCleanupRequired}");
 
                 if (!Directory.Exists(RootFolderPath))
                 {
@@ -77,7 +101,18 @@ namespace FileHasher
 
                 if (File.Exists(CsvFilePath))
                 {
-                    //ConsolePrint($"Updating '{CsvFilePath}'");
+                    // check last hash
+                    if (File.Exists(CsvFileLastHashPath))
+                    {
+                        if (!CalculateSHA256(CsvFilePath).Equals(File.ReadAllText(CsvFileLastHashPath)))
+                        {
+                            throw new Exception($"'{CsvFilePath}' file hash mismatch");
+                        }
+                    }
+                    else
+                    {
+                        File.WriteAllText(CsvFileLastHashPath, CalculateSHA256(CsvFilePath));
+                    }
 
                     // read file contents
                     foreach (var line in File.ReadAllLines(CsvFilePath))
@@ -206,6 +241,9 @@ namespace FileHasher
                     // write csv records to the target file
                     File.WriteAllLines(CsvFilePath, result, new UTF8Encoding(false));
 
+                    // calculate file hash
+                    File.WriteAllText(CsvFileLastHashPath, CalculateSHA256(CsvFilePath));
+
                     if (filesModified > 0) { ConsolePrint($"Files modified: {filesModified}"); }
                     if (filesDeleted > 0) { ConsolePrint($"Files deleted: {filesDeleted}"); }
                     if (filesNew > 0) { ConsolePrint($"Files new: {filesNew}"); }
@@ -215,6 +253,30 @@ namespace FileHasher
                 else
                 {
                     ConsolePrint("Update not required");
+                }
+
+                if (FolderCleanupRequired)
+                {
+                    var filePaths = Directory.EnumerateFiles(RootFolderPath, "*.*", SearchOption.AllDirectories)
+                                    .Where(s => !FileExtensions.Contains(Path.GetExtension(s).ToLower())).ToList();
+
+                    if (filePaths.Count == 0)
+                    {
+                        ConsolePrint("Folder cleanup not required");
+                    }
+                    else
+                    {
+                        int cleanupFilesDeleted = 0;
+
+                        foreach (var path in filePaths)
+                        {
+                            cleanupFilesDeleted++;
+                            File.Delete(path);
+                            ConsolePrint($"File '{path}' deleted");
+                        }
+
+                        ConsolePrint($"Folder cleanup deleted files: {cleanupFilesDeleted}");
+                    }
                 }
             }
             catch (Exception ex)
