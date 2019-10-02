@@ -42,6 +42,14 @@ namespace FileHasher
             Exception
         }
 
+        public enum HashAlgorithm
+        {
+            SHA512,
+            SHA384,
+            SHA256,
+            SHA1
+        }
+
         static string RootFolderPath { get; set; } = $"{ProgramBaseDirectory}Test";
         static string CsvFilePath => $"{ProgramBaseDirectory}Hashes.csv";
         static string LogFilePath => $"{ProgramBaseDirectory}Output.log";
@@ -51,6 +59,7 @@ namespace FileHasher
         static List<string> LogBufer { get; } = new List<string>();
         static bool WaitBeforeExit { get; set; } = false;
         static bool FolderCleanupRequired { get; set; } = false;
+        static HashAlgorithm DefaultHashAlgorithm { get; } = HashAlgorithm.SHA256;
 
         static void Main(string[] args)
         {
@@ -61,7 +70,7 @@ namespace FileHasher
                 {
                     Console.WriteLine(ProgramHeader);
                     Console.WriteLine("Program usage:");
-                    Console.WriteLine($"  {ProgramName} [{nameof(RootFolderPath)}] [{nameof(FileExtensions)}] [-wait|-nowait] [-clean|-noclean]");
+                    Console.WriteLine($"  {ProgramName} [Root folder path] [File extensions list (comma separated)] [-wait|-nowait] [-clean|-noclean]");
                     return;
                 }
 
@@ -104,102 +113,112 @@ namespace FileHasher
                     // check last hash
                     if (File.Exists(CsvFileLastHashPath))
                     {
-                        if (!CalculateSHA256(CsvFilePath).Equals(File.ReadAllText(CsvFileLastHashPath)))
+                        if (!CalculateHash(CsvFilePath).Equals(File.ReadAllText(CsvFileLastHashPath)))
                         {
-                            throw new Exception($"'{CsvFilePath}' file hash mismatch");
+                            throw new Exception($"'{CsvFilePath}' file last hash mismatch");
                         }
-                    }
-                    else
-                    {
-                        File.WriteAllText(CsvFileLastHashPath, CalculateSHA256(CsvFilePath));
                     }
 
                     // read file contents
                     foreach (var line in File.ReadAllLines(CsvFilePath))
                     {
                         var split = line.Split(';');
-                        csv.Add(new CSVFile()
+
+                        if (split.Length != 4)
                         {
-                            FilePath = split[0],
+                            throw new Exception($"'{CsvFilePath}' record(s) have invalid element count");
+                        }
+
+                        csv.Add(new CSVFile(split[0])
+                        {
                             LastWriteTimeUtc = long.Parse(split[1]),
-                            FileSHA256 = split[2]
+                            HashAlgorithm = split[2],
+                            FileHash = split[3]
                         });
                     }
 
                     var filePaths = Directory.EnumerateFiles(RootFolderPath, "*.*", SearchOption.AllDirectories)
                                     .Where(s => FileExtensions.Contains(Path.GetExtension(s).ToLower())).ToList();
 
-                    // find files removed                    
+                    // find deleted files                 
                     for (int i = 0; i < csv.Count; i++)
                     {
-                        bool fileRemoved = true;
+                        bool fileIsDeleted = true;
 
                         foreach (var path in filePaths)
                         {
                             if (csv[i].FilePath.Equals(path))
                             {
-                                fileRemoved = false;
+                                fileIsDeleted = false;
                                 long lastWrite = File.GetLastWriteTime(path).ToFileTimeUtc();
 
                                 // update record, if file modification time is different
                                 if (csv[i].LastWriteTimeUtc != lastWrite)
                                 {
                                     csv[i].LastWriteTimeUtc = lastWrite;
-                                    string tmpHash = CalculateSHA256(path);
+                                    string tmpHash = CalculateHash(path);
 
-                                    if (csv[i].FileSHA256.Equals(tmpHash))
+                                    if (csv[i].FileHash.Equals(tmpHash))
                                     {
-                                        // TODO: message about file last write time mismatch only
-                                        ConsolePrint($"File '{path}' has last write date mismatch, but hashes are identical");
+                                        filesModified++; // increase modified files counter, so that new lastWrite value is updated in csv
+                                        ConsolePrint($"File '{path}' has different last write timestamp, but hashes are identical");
                                     }
                                     else
                                     {
                                         filesModified++;
-                                        csv[i].FileSHA256 = tmpHash;
-                                        ConsolePrint($"[MODIFIED]  '{path}' ({csv[i].FileSHA256Short})", MessageType.FileModified);
-                                    }
+                                        csv[i].FileHash = tmpHash;
 
+                                        if (!csv[i].HashAlgorithm.Equals(DefaultHashAlgorithm.ToString()))
+                                        {
+                                            ConsolePrint($"File '{path}' was hashed using {csv[i].HashAlgorithm} - update using {DefaultHashAlgorithm.ToString()}");
+                                            csv[i].HashAlgorithm = DefaultHashAlgorithm.ToString();
+                                        }
+                                        else
+                                        {
+                                            ConsolePrint($"[MODIFIED]  '{path}' ({DefaultHashAlgorithm.ToString()}: {csv[i].FileHashShort})", MessageType.FileModified);
+                                        }
+                                    }
                                 }
 
                                 break;
                             }
                         }
 
-                        if (fileRemoved)
+                        if (fileIsDeleted)
                         {
                             filesDeleted++;
-                            ConsolePrint($"[DELETED]  '{csv[i].FilePath}'", MessageType.FileDeleted);
+                            ConsolePrint($"[DELETED]  '{csv[i].FilePath}' ({DefaultHashAlgorithm.ToString()}: {csv[i].FileHashShort})", MessageType.FileDeleted);
                             csv.RemoveAt(i);
                             i--; // decreasing index, because of previosly deleted element
                         }
                     }
 
-                    // find files added
+                    // find new files
                     for (int i = 0; i < filePaths.Count; i++)
                     {
-                        bool fileAdded = true;
+                        bool fileIsNew = true;
 
                         foreach (var record in csv)
                         {
                             if (filePaths[i].Equals(record.FilePath))
                             {
-                                fileAdded = false;
+                                fileIsNew = false;
                                 break;
                             }
                         }
 
-                        if (fileAdded)
+                        if (fileIsNew)
                         {
                             filesNew++;
 
-                            csv.Add(new CSVFile()
+                            csv.Add(new CSVFile(filePaths[i])
                             {
-                                FilePath = filePaths[i],
                                 LastWriteTimeUtc = File.GetLastWriteTime(filePaths[i]).ToFileTimeUtc(),
-                                FileSHA256 = CalculateSHA256(filePaths[i])
+                                HashAlgorithm = DefaultHashAlgorithm.ToString(),
+                                FileHash = CalculateHash(filePaths[i])
                             });
 
-                            ConsolePrint($"[NEW]  '{filePaths[i]}' ({csv.Last().FileSHA256Short})", MessageType.FileNew);
+                            ConsolePrint($"[NEW]  '{filePaths[i]}' ({DefaultHashAlgorithm.ToString()}: {csv.Last().FileHashShort})", MessageType.FileNew);
                         }
                     }
                 }
@@ -215,14 +234,14 @@ namespace FileHasher
                     {
                         filesNew++;
 
-                        csv.Add(new CSVFile()
+                        csv.Add(new CSVFile(path)
                         {
-                            FilePath = path,
                             LastWriteTimeUtc = File.GetLastWriteTime(path).ToFileTimeUtc(),
-                            FileSHA256 = CalculateSHA256(path)
+                            HashAlgorithm = DefaultHashAlgorithm.ToString(),
+                            FileHash = CalculateHash(path)
                         });
 
-                        ConsolePrint($"[NEW]  '{path}' ({csv.Last().FileSHA256Short})", MessageType.FileNew);
+                        ConsolePrint($"[NEW]  '{path}' ({csv.Last().FileHashShort})", MessageType.FileNew);
                     }
                 }
 
@@ -242,7 +261,7 @@ namespace FileHasher
                     File.WriteAllLines(CsvFilePath, result, new UTF8Encoding(false));
 
                     // calculate file hash
-                    File.WriteAllText(CsvFileLastHashPath, CalculateSHA256(CsvFilePath));
+                    File.WriteAllText(CsvFileLastHashPath, CalculateHash(CsvFilePath));
 
                     if (filesModified > 0) { ConsolePrint($"Files modified: {filesModified}"); }
                     if (filesDeleted > 0) { ConsolePrint($"Files deleted: {filesDeleted}"); }
@@ -301,37 +320,6 @@ namespace FileHasher
             }
         }
 
-        //private static string CalculateSHA256(string filePath)
-        //{
-        //    byte[] result;
-
-        //    using (var sr = new FileStream(filePath, FileMode.Open, FileAccess.Read))
-        //    {
-        //        using (var sha256 = SHA256.Create()) { result = sha256.ComputeHash(sr); }
-        //    }
-
-        //    var sb = new StringBuilder();
-
-        //    for (int i = 0; i < result.Length; i++)
-        //    {
-        //        sb.Append(result[i].ToString("x2"));
-        //    }
-
-        //    return (sb.ToString());
-        //}
-
-        private static string CalculateSHA256(string filePath)
-        {
-            byte[] result;
-
-            using (var sha256 = SHA256.Create())
-            {
-                result = sha256.ComputeHash(File.ReadAllBytes(filePath));
-            }
-
-            return (BitConverter.ToString(result).Replace("-", string.Empty).ToLower());
-        }
-
         private static void ConsolePrint(string message, MessageType messageType = MessageType.Default)
         {
             if (messageType != MessageType.Default)
@@ -362,5 +350,60 @@ namespace FileHasher
             Console.ResetColor();
             LogBufer.Add($"{(DateTime.Now).ToString(LogTimestampFormat).PadRight(25)} {message}");
         }
+
+        public static string CalculateHash(string filePath)
+        {
+            byte[] result = null;
+
+            if (DefaultHashAlgorithm == HashAlgorithm.SHA512)
+            {
+                using (var hash = SHA512.Create())
+                {
+                    result = hash.ComputeHash(File.ReadAllBytes(filePath));
+                }
+            }
+            else if (DefaultHashAlgorithm == HashAlgorithm.SHA384)
+            {
+                using (var hash = SHA384.Create())
+                {
+                    result = hash.ComputeHash(File.ReadAllBytes(filePath));
+                }
+            }
+            else if (DefaultHashAlgorithm == HashAlgorithm.SHA256)
+            {
+                using (var hash = SHA256.Create())
+                {
+                    result = hash.ComputeHash(File.ReadAllBytes(filePath));
+                }
+            }
+            else if (DefaultHashAlgorithm == HashAlgorithm.SHA1)
+            {
+                using (var hash = SHA1.Create())
+                {
+                    result = hash.ComputeHash(File.ReadAllBytes(filePath));
+                }
+            }
+
+            return (BitConverter.ToString(result).Replace("-", string.Empty).ToLower());
+        }
+
+        //public static string CalculateSHA256(string filePath)
+        //{
+        //    byte[] result;
+
+        //    using (var sr = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+        //    {
+        //        using (var sha256 = SHA256.Create()) { result = sha256.ComputeHash(sr); }
+        //    }
+
+        //    var sb = new StringBuilder();
+
+        //    for (int i = 0; i < result.Length; i++)
+        //    {
+        //        sb.Append(result[i].ToString("x2"));
+        //    }
+
+        //    return (sb.ToString());
+        //}
     }
 }

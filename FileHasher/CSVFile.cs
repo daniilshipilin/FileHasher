@@ -2,11 +2,17 @@ namespace FileHasher
 {
     public class CSVFile
     {
-        public string FilePath { get; set; }
+        public string FilePath { get; }
         public long LastWriteTimeUtc { get; set; }
-        public string FileSHA256 { get; set; }
-        public string FileSHA256Short => FileSHA256.Substring(0, 8);
+        public string HashAlgorithm { get; set; }
+        public string FileHash { get; set; }
+        public string FileHashShort => FileHash.Substring(0, 8);
 
-        public string GetRecordString() => $"{FilePath};{LastWriteTimeUtc};{FileSHA256}";
+        public CSVFile(string filePath)
+        {
+            FilePath = filePath;
+        }
+
+        public string GetRecordString() => $"{FilePath};{LastWriteTimeUtc};{HashAlgorithm};{FileHash}";
     }
 }
