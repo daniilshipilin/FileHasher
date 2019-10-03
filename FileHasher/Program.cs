@@ -1,3 +1,5 @@
+using FileHasher.Models;
+using FileHasher.SQL;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -50,11 +52,9 @@ namespace FileHasher
             SHA1
         }
 
-        static string RootFolderPath { get; set; } = $"{ProgramBaseDirectory}Test";
-        static string CsvFilePath => $"{ProgramBaseDirectory}Hashes.csv";
+        static string RootFolderPath { get; set; }
         static string LogFilePath => $"{ProgramBaseDirectory}Output.log";
-        static string CsvFileLastHashPath => $"{ProgramBaseDirectory}last_hash";
-        static string[] FileExtensions { get; set; } = new string[] { ".txt", ".log" };
+        static string[] FileExtensions { get; set; }
         static string LogTimestampFormat => "yyyy-MM-dd HH:mm:ss.fff";
         static List<string> LogBufer { get; } = new List<string>();
         static bool WaitBeforeExit { get; set; } = false;
@@ -66,11 +66,11 @@ namespace FileHasher
             try
             {
                 // parse args
-                if (args.Length == 1 && args[0].Equals("/?"))
+                if ((args.Length == 1 && args[0].Equals("/?")) || args.Length < 2)
                 {
                     Console.WriteLine(ProgramHeader);
                     Console.WriteLine("Program usage:");
-                    Console.WriteLine($"  {ProgramName} [Root folder path] [File extensions list (comma separated)] [-wait|-nowait] [-clean|-noclean]");
+                    Console.WriteLine($"  {ProgramName} \"Root folder path\" \"File extensions list (comma separated)\" [-wait|-nowait] [-clean|-noclean]");
                     return;
                 }
 
@@ -103,183 +103,119 @@ namespace FileHasher
                     throw new DirectoryNotFoundException($"Directory '{RootFolderPath}' doesn't exist");
                 }
 
-                var csv = new List<CSVFile>();
                 int filesModified = 0;
                 int filesDeleted = 0;
                 int filesNew = 0;
 
-                if (File.Exists(CsvFilePath))
+                var _sqlite = new SQLiteDBAccess();
+                var dbFilePaths = _sqlite.Select_FilePaths();
+
+                var filePaths = Directory.EnumerateFiles(RootFolderPath, "*.*", SearchOption.AllDirectories)
+                                .Where(s => FileExtensions.Contains(Path.GetExtension(s).ToLower())).ToList();
+
+                // find deleted files
+                for (int i = 0; i < dbFilePaths.Count; i++)
                 {
-                    // check last hash
-                    if (File.Exists(CsvFileLastHashPath))
+                    bool fileIsDeleted = true;
+
+                    foreach (var path in filePaths)
                     {
-                        if (!CalculateHash(CsvFilePath).Equals(File.ReadAllText(CsvFileLastHashPath)))
+                        if (dbFilePaths[i].FilePath.Equals(path))
                         {
-                            throw new Exception($"'{CsvFilePath}' file last hash mismatch");
-                        }
-                    }
+                            fileIsDeleted = false;
+                            long lastWrite = File.GetLastWriteTime(path).ToFileTimeUtc();
 
-                    // read file contents
-                    foreach (var line in File.ReadAllLines(CsvFilePath))
-                    {
-                        var split = line.Split(';');
-
-                        if (split.Length != 4)
-                        {
-                            throw new Exception($"'{CsvFilePath}' record(s) have invalid element count");
-                        }
-
-                        csv.Add(new CSVFile(split[0])
-                        {
-                            LastWriteTimeUtc = long.Parse(split[1]),
-                            HashAlgorithm = split[2],
-                            FileHash = split[3]
-                        });
-                    }
-
-                    var filePaths = Directory.EnumerateFiles(RootFolderPath, "*.*", SearchOption.AllDirectories)
-                                    .Where(s => FileExtensions.Contains(Path.GetExtension(s).ToLower())).ToList();
-
-                    // find deleted files                 
-                    for (int i = 0; i < csv.Count; i++)
-                    {
-                        bool fileIsDeleted = true;
-
-                        foreach (var path in filePaths)
-                        {
-                            if (csv[i].FilePath.Equals(path))
+                            // update record, if file modification time is different
+                            if (dbFilePaths[i].LastWriteTimeUtc != lastWrite)
                             {
-                                fileIsDeleted = false;
-                                long lastWrite = File.GetLastWriteTime(path).ToFileTimeUtc();
+                                dbFilePaths[i].LastWriteTimeUtc = lastWrite;
+                                string tmpHash = CalculateHash(path);
 
-                                // update record, if file modification time is different
-                                if (csv[i].LastWriteTimeUtc != lastWrite)
+                                if (dbFilePaths[i].FileHash.Equals(tmpHash))
                                 {
-                                    csv[i].LastWriteTimeUtc = lastWrite;
-                                    string tmpHash = CalculateHash(path);
+                                    filesModified++; // increase modified files counter, so that new lastWrite value is updated in db
+                                    ConsolePrint($"File '{path}' has different last write timestamp, but hashes are identical");
+                                }
+                                else
+                                {
+                                    filesModified++;
+                                    dbFilePaths[i].FileHash = tmpHash;
 
-                                    if (csv[i].FileHash.Equals(tmpHash))
+                                    if (!dbFilePaths[i].HashAlgorithm.Equals(DefaultHashAlgorithm.ToString()))
                                     {
-                                        filesModified++; // increase modified files counter, so that new lastWrite value is updated in csv
-                                        ConsolePrint($"File '{path}' has different last write timestamp, but hashes are identical");
-                                    }
-                                    else
-                                    {
-                                        filesModified++;
-                                        csv[i].FileHash = tmpHash;
-
-                                        if (!csv[i].HashAlgorithm.Equals(DefaultHashAlgorithm.ToString()))
-                                        {
-                                            ConsolePrint($"File '{path}' was hashed using {csv[i].HashAlgorithm} - update using {DefaultHashAlgorithm.ToString()}");
-                                            csv[i].HashAlgorithm = DefaultHashAlgorithm.ToString();
-                                        }
-                                        else
-                                        {
-                                            ConsolePrint($"[MODIFIED]  '{path}' ({DefaultHashAlgorithm.ToString()}: {csv[i].FileHashShort})", MessageType.FileModified);
-                                        }
+                                        ConsolePrint($"File '{path}' was hashed using {dbFilePaths[i].HashAlgorithm} - update using {DefaultHashAlgorithm.ToString()}");
+                                        dbFilePaths[i].HashAlgorithm = DefaultHashAlgorithm.ToString();
                                     }
                                 }
 
-                                break;
+                                _sqlite.Update_FilePath(dbFilePaths[i]);
+                                ConsolePrint($"[MODIFIED]  '{path}' ({dbFilePaths[i].GetFileHashShort()})", MessageType.FileModified);
                             }
-                        }
 
-                        if (fileIsDeleted)
-                        {
-                            filesDeleted++;
-                            ConsolePrint($"[DELETED]  '{csv[i].FilePath}' ({DefaultHashAlgorithm.ToString()}: {csv[i].FileHashShort})", MessageType.FileDeleted);
-                            csv.RemoveAt(i);
-                            i--; // decreasing index, because of previosly deleted element
+                            break;
                         }
                     }
 
-                    // find new files
-                    for (int i = 0; i < filePaths.Count; i++)
+                    if (fileIsDeleted)
                     {
-                        bool fileIsNew = true;
-
-                        foreach (var record in csv)
-                        {
-                            if (filePaths[i].Equals(record.FilePath))
-                            {
-                                fileIsNew = false;
-                                break;
-                            }
-                        }
-
-                        if (fileIsNew)
-                        {
-                            filesNew++;
-
-                            csv.Add(new CSVFile(filePaths[i])
-                            {
-                                LastWriteTimeUtc = File.GetLastWriteTime(filePaths[i]).ToFileTimeUtc(),
-                                HashAlgorithm = DefaultHashAlgorithm.ToString(),
-                                FileHash = CalculateHash(filePaths[i])
-                            });
-
-                            ConsolePrint($"[NEW]  '{filePaths[i]}' ({DefaultHashAlgorithm.ToString()}: {csv.Last().FileHashShort})", MessageType.FileNew);
-                        }
+                        filesDeleted++;
+                        _sqlite.Delete_FilePath(dbFilePaths[i]);
+                        ConsolePrint($"[DELETED]  '{dbFilePaths[i].FilePath}' ({dbFilePaths[i].GetFileHashShort()})", MessageType.FileDeleted);
+                        dbFilePaths.RemoveAt(i);
+                        i--; // decreasing index, because of previosly deleted element
                     }
                 }
-                else
+
+                // find new files
+                for (int i = 0; i < filePaths.Count; i++)
                 {
-                    var filePaths = Directory.EnumerateFiles(RootFolderPath, "*.*", SearchOption.AllDirectories)
-                                    .Where(s => FileExtensions.Contains(Path.GetExtension(s).ToLower())).ToList();
+                    bool fileIsNew = true;
 
-                    if (filePaths.Count() == 0) { throw new Exception("No files to process"); }
+                    foreach (var record in dbFilePaths)
+                    {
+                        if (filePaths[i].Equals(record.FilePath))
+                        {
+                            fileIsNew = false;
+                            break;
+                        }
+                    }
 
-                    // create csv records
-                    foreach (var path in filePaths)
+                    if (fileIsNew)
                     {
                         filesNew++;
 
-                        csv.Add(new CSVFile(path)
+                        dbFilePaths.Add(new FilePathsDBModel()
                         {
-                            LastWriteTimeUtc = File.GetLastWriteTime(path).ToFileTimeUtc(),
+                            FilePath = filePaths[i],
+                            LastWriteTimeUtc = File.GetLastWriteTime(filePaths[i]).ToFileTimeUtc(),
                             HashAlgorithm = DefaultHashAlgorithm.ToString(),
-                            FileHash = CalculateHash(path)
+                            FileHash = CalculateHash(filePaths[i])
                         });
 
-                        ConsolePrint($"[NEW]  '{path}' ({csv.Last().FileHashShort})", MessageType.FileNew);
+                        _sqlite.Insert_FilePath(dbFilePaths.Last());
+                        ConsolePrint($"[NEW]  '{filePaths[i]}' ({dbFilePaths.Last().GetFileHashShort()})", MessageType.FileNew);
                     }
                 }
 
                 if (filesModified > 0 || filesDeleted > 0 || filesNew > 0)
                 {
-                    ConsolePrint($"Updating '{CsvFilePath}'");
-
-                    var csvSorted = csv.OrderBy(x => x.FilePath).ToList();
-                    var result = new List<string>();
-
-                    foreach (var record in csvSorted)
-                    {
-                        result.Add(record.GetRecordString());
-                    }
-
-                    // write csv records to the target file
-                    File.WriteAllLines(CsvFilePath, result, new UTF8Encoding(false));
-
-                    // calculate file hash
-                    File.WriteAllText(CsvFileLastHashPath, CalculateHash(CsvFilePath));
-
                     if (filesModified > 0) { ConsolePrint($"Files modified: {filesModified}"); }
                     if (filesDeleted > 0) { ConsolePrint($"Files deleted: {filesDeleted}"); }
                     if (filesNew > 0) { ConsolePrint($"Files new: {filesNew}"); }
-
-                    ConsolePrint($"Total records count: {result.Count}");
                 }
                 else
                 {
                     ConsolePrint("Update not required");
                 }
 
+                ConsolePrint($"Total records in db: {_sqlite.Select_CountRecords()}");
+
                 if (FolderCleanupRequired)
                 {
-                    var filePaths = Directory.EnumerateFiles(RootFolderPath, "*.*", SearchOption.AllDirectories)
+                    var filePathsToDelete = Directory.EnumerateFiles(RootFolderPath, "*.*", SearchOption.AllDirectories)
                                     .Where(s => !FileExtensions.Contains(Path.GetExtension(s).ToLower())).ToList();
 
-                    if (filePaths.Count == 0)
+                    if (filePathsToDelete.Count == 0)
                     {
                         ConsolePrint("Folder cleanup not required");
                     }
@@ -287,7 +223,7 @@ namespace FileHasher
                     {
                         int cleanupFilesDeleted = 0;
 
-                        foreach (var path in filePaths)
+                        foreach (var path in filePathsToDelete)
                         {
                             cleanupFilesDeleted++;
                             File.Delete(path);
@@ -357,30 +293,42 @@ namespace FileHasher
 
             if (DefaultHashAlgorithm == HashAlgorithm.SHA512)
             {
-                using (var hash = SHA512.Create())
+                using (var sr = new FileStream(filePath, FileMode.Open, FileAccess.Read))
                 {
-                    result = hash.ComputeHash(File.ReadAllBytes(filePath));
+                    using (var hash = SHA512.Create())
+                    {
+                        result = hash.ComputeHash(sr);
+                    }
                 }
             }
             else if (DefaultHashAlgorithm == HashAlgorithm.SHA384)
             {
-                using (var hash = SHA384.Create())
+                using (var sr = new FileStream(filePath, FileMode.Open, FileAccess.Read))
                 {
-                    result = hash.ComputeHash(File.ReadAllBytes(filePath));
+                    using (var hash = SHA384.Create())
+                    {
+                        result = hash.ComputeHash(sr);
+                    }
                 }
             }
             else if (DefaultHashAlgorithm == HashAlgorithm.SHA256)
             {
-                using (var hash = SHA256.Create())
+                using (var sr = new FileStream(filePath, FileMode.Open, FileAccess.Read))
                 {
-                    result = hash.ComputeHash(File.ReadAllBytes(filePath));
+                    using (var hash = SHA256.Create())
+                    {
+                        result = hash.ComputeHash(sr);
+                    }
                 }
             }
             else if (DefaultHashAlgorithm == HashAlgorithm.SHA1)
             {
-                using (var hash = SHA1.Create())
+                using (var sr = new FileStream(filePath, FileMode.Open, FileAccess.Read))
                 {
-                    result = hash.ComputeHash(File.ReadAllBytes(filePath));
+                    using (var hash = SHA1.Create())
+                    {
+                        result = hash.ComputeHash(sr);
+                    }
                 }
             }
 
