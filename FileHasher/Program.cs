@@ -52,14 +52,18 @@ namespace FileHasher
             SHA1
         }
 
-        static string RootFolderPath { get; set; }
-        static string LogFilePath => $"{ProgramBaseDirectory}Output.log";
-        static string[] FileExtensions { get; set; }
-        static string LogTimestampFormat => "yyyy-MM-dd HH:mm:ss.fff";
-        static List<string> LogBufer { get; } = new List<string>();
-        static bool WaitBeforeExit { get; set; } = false;
-        static bool FolderCleanupRequired { get; set; } = false;
-        static HashAlgorithm DefaultHashAlgorithm { get; } = HashAlgorithm.SHA256;
+        const string LOG_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss.fff";
+
+        static readonly string _logFilePath = $"{ProgramBaseDirectory}Output.log";
+        static readonly List<string> _logBufer = new List<string>();
+        static readonly HashAlgorithm _defaultHashAlgorithm = HashAlgorithm.SHA256;
+
+        static string _rootFolderPath;
+        static string[] _fileExtensions;
+        static bool _waitBeforeExit = false;
+        static bool _folderCleanupScheduled = false;
+        static bool _dbUpdatePrompt = false;
+        static bool _dbOptimizationScheduled = false;
 
         static void Main(string[] args)
         {
@@ -70,48 +74,49 @@ namespace FileHasher
                 {
                     Console.WriteLine(ProgramHeader);
                     Console.WriteLine("Program usage:");
-                    Console.WriteLine($"  {ProgramName} \"Root folder path\" \"File extensions list (comma separated)\" [-wait|-nowait] [-clean|-noclean]");
+                    Console.WriteLine($"  {ProgramName} \"Root folder path\" \"File extensions list (comma separated)\" [-wait] [-clean] [-prompt] [-optimize]");
                     return;
                 }
 
                 ConsolePrint(ProgramHeader);
 
-                if (args.Length >= 1) { RootFolderPath = Path.GetFullPath(args[0]); }
+                if (args.Length >= 1) { _rootFolderPath = Path.GetFullPath(args[0]); }
 
-                if (args.Length >= 2) { FileExtensions = args[1].Split(','); }
+                if (args.Length >= 2) { _fileExtensions = args[1].Split(','); }
 
                 if (args.Length >= 3)
                 {
-                    if (args[2].Equals("-wait")) { WaitBeforeExit = true; }
-                    else { WaitBeforeExit = false; }
+                    for (int i = 2; i < args.Length; i++)
+                    {
+                        if (args[i].Equals("-wait")) { _waitBeforeExit = true; }
+                        else if (args[i].Equals("-clean")) { _folderCleanupScheduled = true; }
+                        else if (args[i].Equals("-prompt")) { _dbUpdatePrompt = true; }
+                        else if (args[i].Equals("-optimize")) { _dbOptimizationScheduled = true; }
+                    }
                 }
 
-                if (args.Length >= 4)
+                if (!Directory.Exists(_rootFolderPath))
                 {
-                    if (args[3].Equals("-clean")) { FolderCleanupRequired = true; }
-                    else { FolderCleanupRequired = false; }
+                    throw new DirectoryNotFoundException($"Directory '{_rootFolderPath}' doesn't exist");
                 }
 
                 // print args
-                ConsolePrint($"{nameof(RootFolderPath)}={RootFolderPath}");
-                ConsolePrint($"{nameof(FileExtensions)}={string.Join(",", FileExtensions)}");
-                ConsolePrint($"{nameof(WaitBeforeExit)}={WaitBeforeExit}");
-                ConsolePrint($"{nameof(FolderCleanupRequired)}={FolderCleanupRequired}");
-
-                if (!Directory.Exists(RootFolderPath))
-                {
-                    throw new DirectoryNotFoundException($"Directory '{RootFolderPath}' doesn't exist");
-                }
+                ConsolePrint($"Root folder path = {_rootFolderPath}");
+                ConsolePrint($"File extensions = {string.Join(",", _fileExtensions)}");
+                ConsolePrint($"Wait before exit = {_waitBeforeExit}");
+                ConsolePrint($"Folder cleanup scheduled = {_folderCleanupScheduled}");
+                ConsolePrint($"DB update prompt = {_dbUpdatePrompt}");
+                ConsolePrint($"DB optimization scheduled = {_dbOptimizationScheduled}");
 
                 int filesModified = 0;
                 int filesDeleted = 0;
                 int filesNew = 0;
 
-                var _sqlite = new SQLiteDBAccess();
-                var dbFilePaths = _sqlite.Select_FilePaths();
+                var sqlite = new SQLiteDBAccess();
+                var dbFilePaths = sqlite.Select_FilePaths();
 
-                var filePaths = Directory.EnumerateFiles(RootFolderPath, "*.*", SearchOption.AllDirectories)
-                                .Where(s => FileExtensions.Contains(Path.GetExtension(s).ToLower())).ToList();
+                var filePaths = Directory.EnumerateFiles(_rootFolderPath, "*.*", SearchOption.AllDirectories)
+                                .Where(s => _fileExtensions.Contains(Path.GetExtension(s).ToLower())).ToList();
 
                 // find deleted files
                 for (int i = 0; i < dbFilePaths.Count; i++)
@@ -128,28 +133,35 @@ namespace FileHasher
                             // update record, if file modification time is different
                             if (dbFilePaths[i].LastWriteTimeUtc != lastWrite)
                             {
-                                dbFilePaths[i].LastWriteTimeUtc = lastWrite;
-                                string tmpHash = CalculateHash(path);
-
-                                if (dbFilePaths[i].FileHash.Equals(tmpHash))
+                                if (DisplayPromptYesNo($"File '{dbFilePaths[i].FilePath}' was modified. Update db? (yes/no):"))
                                 {
-                                    filesModified++; // increase modified files counter, so that new lastWrite value is updated in db
-                                    ConsolePrint($"File '{path}' has different last write timestamp, but hashes are identical");
-                                }
-                                else
-                                {
-                                    filesModified++;
-                                    dbFilePaths[i].FileHash = tmpHash;
+                                    dbFilePaths[i].LastWriteTimeUtc = lastWrite;
+                                    string tmpHash = CalculateHash(path);
 
-                                    if (!dbFilePaths[i].HashAlgorithm.Equals(DefaultHashAlgorithm.ToString()))
+                                    if (dbFilePaths[i].FileHash.Equals(tmpHash))
                                     {
-                                        ConsolePrint($"File '{path}' was hashed using {dbFilePaths[i].HashAlgorithm} - update using {DefaultHashAlgorithm.ToString()}");
-                                        dbFilePaths[i].HashAlgorithm = DefaultHashAlgorithm.ToString();
+                                        filesModified++; // increase modified files counter, so that new lastWrite value is updated in db
+                                        ConsolePrint($"File '{path}' has different last write timestamp, but hashes are identical");
                                     }
-                                }
+                                    else
+                                    {
+                                        filesModified++;
+                                        dbFilePaths[i].FileHash = tmpHash;
 
-                                _sqlite.Update_FilePath(dbFilePaths[i]);
-                                ConsolePrint($"[MODIFIED]  '{path}' ({dbFilePaths[i].GetFileHashShort()})", MessageType.FileModified);
+                                        if (!dbFilePaths[i].HashAlgorithm.Equals(_defaultHashAlgorithm.ToString()))
+                                        {
+                                            ConsolePrint($"File '{path}' was hashed using {dbFilePaths[i].HashAlgorithm} - update using {_defaultHashAlgorithm.ToString()}");
+                                            dbFilePaths[i].HashAlgorithm = _defaultHashAlgorithm.ToString();
+                                        }
+                                    }
+
+                                    sqlite.Update_FilePath(dbFilePaths[i]);
+
+                                    // update file as base64 string
+                                    sqlite.Update_Base64String(new Base64StringsDBModel() { Base64String = ConvertFileToBase64String(dbFilePaths[i].FilePath), FK_FilePathID = dbFilePaths[i].FilePathID });
+
+                                    ConsolePrint($"[MODIFIED]  '{path}' ({dbFilePaths[i].GetFileHashShort()})", MessageType.FileModified);
+                                }
                             }
 
                             break;
@@ -158,11 +170,18 @@ namespace FileHasher
 
                     if (fileIsDeleted)
                     {
-                        filesDeleted++;
-                        _sqlite.Delete_FilePath(dbFilePaths[i]);
-                        ConsolePrint($"[DELETED]  '{dbFilePaths[i].FilePath}' ({dbFilePaths[i].GetFileHashShort()})", MessageType.FileDeleted);
-                        dbFilePaths.RemoveAt(i);
-                        i--; // decreasing index, because of previosly deleted element
+                        if (DisplayPromptYesNo($"File '{dbFilePaths[i].FilePath}' was deleted. Update db? (yes/no):"))
+                        {
+                            filesDeleted++;
+                            sqlite.Delete_FilePath(dbFilePaths[i]);
+
+                            // delete base64 string
+                            sqlite.Delete_Base64String(new Base64StringsDBModel() { FK_FilePathID = dbFilePaths[i].FilePathID });
+
+                            ConsolePrint($"[DELETED]  '{dbFilePaths[i].FilePath}' ({dbFilePaths[i].GetFileHashShort()})", MessageType.FileDeleted);
+                            dbFilePaths.RemoveAt(i);
+                            i--; // decreasing index, because of previosly deleted element
+                        }
                     }
                 }
 
@@ -182,18 +201,28 @@ namespace FileHasher
 
                     if (fileIsNew)
                     {
-                        filesNew++;
-
-                        dbFilePaths.Add(new FilePathsDBModel()
+                        if (DisplayPromptYesNo($"File '{filePaths[i]}' was added. Update db? (yes/no):"))
                         {
-                            FilePath = filePaths[i],
-                            LastWriteTimeUtc = File.GetLastWriteTime(filePaths[i]).ToFileTimeUtc(),
-                            HashAlgorithm = DefaultHashAlgorithm.ToString(),
-                            FileHash = CalculateHash(filePaths[i])
-                        });
+                            filesNew++;
 
-                        _sqlite.Insert_FilePath(dbFilePaths.Last());
-                        ConsolePrint($"[NEW]  '{filePaths[i]}' ({dbFilePaths.Last().GetFileHashShort()})", MessageType.FileNew);
+                            dbFilePaths.Add(new FilePathsDBModel()
+                            {
+                                FilePath = filePaths[i],
+                                LastWriteTimeUtc = File.GetLastWriteTime(filePaths[i]).ToFileTimeUtc(),
+                                HashAlgorithm = _defaultHashAlgorithm.ToString(),
+                                FileHash = CalculateHash(filePaths[i])
+                            });
+
+                            sqlite.Insert_FilePath(dbFilePaths.Last());
+
+                            // select FilePathID from last insert operation
+                            int filePathID = sqlite.Select_FilePathID(dbFilePaths.Last());
+
+                            // add file as base64 string
+                            sqlite.Insert_Base64String(new Base64StringsDBModel() { Base64String = ConvertFileToBase64String(dbFilePaths.Last().FilePath), FK_FilePathID = filePathID });
+
+                            ConsolePrint($"[NEW]  '{filePaths[i]}' ({dbFilePaths.Last().GetFileHashShort()})", MessageType.FileNew);
+                        }
                     }
                 }
 
@@ -208,12 +237,20 @@ namespace FileHasher
                     ConsolePrint("Update not required");
                 }
 
-                ConsolePrint($"Total records in db: {_sqlite.Select_CountRecords()}");
+                int records = sqlite.Select_CountRecords_FilePaths();
+                ConsolePrint($"Total file paths in db: {records}");
 
-                if (FolderCleanupRequired)
+                // compact db
+                if (_dbOptimizationScheduled)
                 {
-                    var filePathsToDelete = Directory.EnumerateFiles(RootFolderPath, "*.*", SearchOption.AllDirectories)
-                                    .Where(s => !FileExtensions.Contains(Path.GetExtension(s).ToLower())).ToList();
+                    ConsolePrint("Optimizing db");
+                    sqlite.CompactDatabase();
+                }
+
+                if (_folderCleanupScheduled)
+                {
+                    var filePathsToDelete = Directory.EnumerateFiles(_rootFolderPath, "*.*", SearchOption.AllDirectories)
+                                    .Where(s => !_fileExtensions.Contains(Path.GetExtension(s).ToLower())).ToList();
 
                     if (filePathsToDelete.Count == 0)
                     {
@@ -242,18 +279,33 @@ namespace FileHasher
             try
             {
                 // write log file
-                File.AppendAllLines(LogFilePath, LogBufer, new UTF8Encoding(false));
+                File.AppendAllLines(_logFilePath, _logBufer, new UTF8Encoding(false));
             }
             catch (Exception ex)
             {
                 Console.WriteLine(ex.ToString());
             }
 
-            if (WaitBeforeExit)
+            if (_waitBeforeExit)
             {
                 Console.WriteLine("Press ENTER to exit");
                 Console.ReadLine();
             }
+        }
+
+        private static bool DisplayPromptYesNo(string message)
+        {
+            bool result = true;
+
+            if (_dbUpdatePrompt)
+            {
+                Console.WriteLine(message);
+
+                if (Console.ReadKey(true).Key == ConsoleKey.Y) { result = true; }
+                else { result = false; }
+            }
+
+            return (result);
         }
 
         private static void ConsolePrint(string message, MessageType messageType = MessageType.Default)
@@ -284,46 +336,39 @@ namespace FileHasher
 
             Console.WriteLine(message);
             Console.ResetColor();
-            LogBufer.Add($"{(DateTime.Now).ToString(LogTimestampFormat).PadRight(25)} {message}");
+            _logBufer.Add($"{DateTime.Now.ToString(LOG_TIMESTAMP_FORMAT).PadRight(25)} {message}");
         }
+
+        private static string ConvertFileToBase64String(string filePath) => (Convert.ToBase64String(File.ReadAllBytes(filePath)));
 
         public static string CalculateHash(string filePath)
         {
             byte[] result = null;
 
-            if (DefaultHashAlgorithm == HashAlgorithm.SHA512)
+            using (var sr = new FileStream(filePath, FileMode.Open, FileAccess.Read))
             {
-                using (var sr = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+                if (_defaultHashAlgorithm == HashAlgorithm.SHA512)
                 {
                     using (var hash = SHA512.Create())
                     {
                         result = hash.ComputeHash(sr);
                     }
                 }
-            }
-            else if (DefaultHashAlgorithm == HashAlgorithm.SHA384)
-            {
-                using (var sr = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+                else if (_defaultHashAlgorithm == HashAlgorithm.SHA384)
                 {
                     using (var hash = SHA384.Create())
                     {
                         result = hash.ComputeHash(sr);
                     }
                 }
-            }
-            else if (DefaultHashAlgorithm == HashAlgorithm.SHA256)
-            {
-                using (var sr = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+                else if (_defaultHashAlgorithm == HashAlgorithm.SHA256)
                 {
                     using (var hash = SHA256.Create())
                     {
                         result = hash.ComputeHash(sr);
                     }
                 }
-            }
-            else if (DefaultHashAlgorithm == HashAlgorithm.SHA1)
-            {
-                using (var sr = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+                else if (_defaultHashAlgorithm == HashAlgorithm.SHA1)
                 {
                     using (var hash = SHA1.Create())
                     {
@@ -334,24 +379,5 @@ namespace FileHasher
 
             return (BitConverter.ToString(result).Replace("-", string.Empty).ToLower());
         }
-
-        //public static string CalculateSHA256(string filePath)
-        //{
-        //    byte[] result;
-
-        //    using (var sr = new FileStream(filePath, FileMode.Open, FileAccess.Read))
-        //    {
-        //        using (var sha256 = SHA256.Create()) { result = sha256.ComputeHash(sr); }
-        //    }
-
-        //    var sb = new StringBuilder();
-
-        //    for (int i = 0; i < result.Length; i++)
-        //    {
-        //        sb.Append(result[i].ToString("x2"));
-        //    }
-
-        //    return (sb.ToString());
-        //}
     }
 }

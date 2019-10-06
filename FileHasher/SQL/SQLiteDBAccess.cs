@@ -12,12 +12,15 @@ namespace FileHasher.SQL
 {
     public class SQLiteDBAccess
     {
+        public const int DATABASE_VERSION = 2;
+
         readonly string _connectionString;
 
         public SQLiteDBAccess(string connectionStringsSection = "Default")
         {
             _connectionString = GetConnectionString(connectionStringsSection);
             CheckDBExists();
+            CheckDBVersion();
         }
 
         private void CheckDBExists()
@@ -34,6 +37,26 @@ namespace FileHasher.SQL
 
                 // create new default db
                 File.WriteAllBytes(dbFilePath, Properties.Resources.DefaultDBFile);
+            }
+        }
+
+        private void CheckDBVersion()
+        {
+            var settings = Select_Settings();
+            bool checkPassed = false;
+
+            foreach (var setting in settings)
+            {
+                if (setting.SettingKey.Equals("DatabaseVersion"))
+                {
+                    checkPassed = (int.Parse(setting.SettingValue) == DATABASE_VERSION);
+                    break;
+                }
+            }
+
+            if (!checkPassed)
+            {
+                throw new Exception($"DB version check failed. Currently db supported version is '{DATABASE_VERSION}'.");
             }
         }
 
@@ -55,6 +78,19 @@ namespace FileHasher.SQL
 
         #region DB queries
 
+        public List<SettingsDBModel> Select_Settings()
+        {
+            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
+            {
+                string query = "SELECT * " +
+                               "FROM Settings;";
+
+                var output = cnn.Query<SettingsDBModel>(query);
+
+                return (output.ToList());
+            }
+        }
+
         public List<FilePathsDBModel> Select_FilePaths()
         {
             using (IDbConnection cnn = new SQLiteConnection(_connectionString))
@@ -66,6 +102,20 @@ namespace FileHasher.SQL
                 var output = cnn.Query<FilePathsDBModel>(query);
 
                 return (output.ToList());
+            }
+        }
+
+        public int Select_FilePathID(FilePathsDBModel model)
+        {
+            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
+            {
+                string query = "SELECT FilePathID " +
+                               "FROM FilePaths " +
+                               "WHERE FilePath = @FilePath;";
+
+                int output = cnn.ExecuteScalar<int>(query, model);
+
+                return (output);
             }
         }
 
@@ -103,16 +153,73 @@ namespace FileHasher.SQL
             }
         }
 
-        public int Select_CountRecords()
+        public void Insert_Base64String(Base64StringsDBModel model)
+        {
+            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
+            {
+                string query = "INSERT INTO Base64Strings (Base64String, FK_FilePathID) " +
+                               "VALUES (@Base64String, @FK_FilePathID);";
+
+                cnn.Execute(query, model);
+            }
+        }
+
+        public void Update_Base64String(Base64StringsDBModel model)
+        {
+            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
+            {
+                string query = "UPDATE Base64Strings " +
+                               "SET Base64String = @Base64String " +
+                               "WHERE FK_FilePathID = @FK_FilePathID;";
+
+                cnn.Execute(query, model);
+            }
+        }
+
+        public void Delete_Base64String(Base64StringsDBModel model)
+        {
+            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
+            {
+                string query = "DELETE FROM Base64Strings " +
+                               "WHERE FK_FilePathID = @FK_FilePathID;";
+
+                cnn.Execute(query, model);
+            }
+        }
+
+        public int Select_CountRecords_FilePaths()
         {
             using (IDbConnection cnn = new SQLiteConnection(_connectionString))
             {
                 string query = "SELECT COUNT(*) " +
                                "FROM FilePaths;";
 
-                var output = cnn.ExecuteScalar<int>(query);
+                int output = cnn.ExecuteScalar<int>(query);
 
                 return (output);
+            }
+        }
+
+        public int Select_CountRecords_Base64Strings()
+        {
+            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
+            {
+                string query = "SELECT COUNT(*) " +
+                               "FROM Base64Strings;";
+
+                int output = cnn.ExecuteScalar<int>(query);
+
+                return (output);
+            }
+        }
+
+        public void CompactDatabase()
+        {
+            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
+            {
+                string query = "VACUUM main;";
+
+                cnn.Execute(query);
             }
         }
 
