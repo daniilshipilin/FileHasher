@@ -119,6 +119,20 @@ namespace FileHasher.SQL
             }
         }
 
+        public byte[] Select_Base64String(FilePathsDBModel model)
+        {
+            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
+            {
+                string query = "SELECT Base64String " +
+                               "FROM Base64Strings " +
+                               "WHERE FK_FilePathID = @FilePathID;";
+
+                var output = cnn.QuerySingle<byte[]>(query, model);
+
+                return (output);
+            }
+        }
+
         public void Insert_FilePath(FilePathsDBModel model)
         {
             using (IDbConnection cnn = new SQLiteConnection(_connectionString))
@@ -136,6 +150,18 @@ namespace FileHasher.SQL
             {
                 string query = "UPDATE FilePaths " +
                                "SET FilePath = @FilePath, LastWriteTimeUtc = @LastWriteTimeUtc, HashAlgorithm = @HashAlgorithm, FileHash = @FileHash " +
+                               "WHERE FilePathID = @FilePathID;";
+
+                cnn.Execute(query, model);
+            }
+        }
+
+        public void Update_LastWriteTimeUtc(FilePathsDBModel model)
+        {
+            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
+            {
+                string query = "UPDATE FilePaths " +
+                               "SET LastWriteTimeUtc = @LastWriteTimeUtc " +
                                "WHERE FilePathID = @FilePathID;";
 
                 cnn.Execute(query, model);
@@ -176,12 +202,12 @@ namespace FileHasher.SQL
             }
         }
 
-        public void Delete_Base64String(Base64StringsDBModel model)
+        public void Delete_Base64String(FilePathsDBModel model)
         {
             using (IDbConnection cnn = new SQLiteConnection(_connectionString))
             {
                 string query = "DELETE FROM Base64Strings " +
-                               "WHERE FK_FilePathID = @FK_FilePathID;";
+                               "WHERE FK_FilePathID = @FilePathID;";
 
                 cnn.Execute(query, model);
             }
