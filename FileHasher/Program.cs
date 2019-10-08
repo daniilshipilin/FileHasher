@@ -45,19 +45,11 @@ namespace FileHasher
             Exception
         }
 
-        public enum HashAlgorithm
-        {
-            SHA512,
-            SHA384,
-            SHA256,
-            SHA1
-        }
-
         const string LOG_TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss.fff";
+        const string HASH_ALGORITHM = "SHA256";
 
         static readonly string _logFilePath = $"{ProgramBaseDirectory}Output.log";
         static readonly List<string> _logBufer = new List<string>();
-        static readonly HashAlgorithm _defaultHashAlgorithm = HashAlgorithm.SHA256;
 
         static SQLiteDBAccess _sqlite;
 
@@ -200,21 +192,27 @@ namespace FileHasher
 
                         if (dbFilePaths[i].LastWriteTimeUtc != lastWrite)
                         {
-                            if (DisplayPromptYesNo($"'{dbFilePaths[i].FilePath}' was modified. Restore from db? (y/n):"))
+                            dbFilePaths[i].LastWriteTimeUtc = lastWrite;
+                            string tmpHash = CalculateHash(File.ReadAllBytes(dbFilePaths[i].FilePath));
+
+                            if (dbFilePaths[i].FileHash.Equals(tmpHash))
                             {
-                                filesRestored++;
-                                string targetDir = Path.GetDirectoryName(dbFilePaths[i].FilePath);
-
-                                if (!Directory.Exists(targetDir)) { Directory.CreateDirectory(targetDir); }
-
-                                string base64 = Encoding.ASCII.GetString(_sqlite.Select_Base64String(dbFilePaths[i]));
-                                File.WriteAllBytes(dbFilePaths[i].FilePath, ConvertBase64StringToBytes(base64));
-
-                                // update last write timestamp
-                                dbFilePaths[i].LastWriteTimeUtc = File.GetLastWriteTime(dbFilePaths[i].FilePath).ToFileTimeUtc();
                                 _sqlite.Update_LastWriteTimeUtc(dbFilePaths[i]);
+                                ConsolePrint($"'{dbFilePaths[i].FilePath}' has different last write timestamp, but hashes are identical");
+                            }
+                            else
+                            {
+                                if (DisplayPromptYesNo($"'{dbFilePaths[i].FilePath}' was modified. Restore from db? (y/n):"))
+                                {
+                                    filesRestored++;
+                                    RestoreFile(dbFilePaths[i].FilePath, _sqlite.Select_Blob(dbFilePaths[i]));
 
-                                ConsolePrint($"[RESTORED - MODIFIED]  '{dbFilePaths[i].FilePath}'", MessageType.FileRestored);
+                                    // update last write timestamp
+                                    dbFilePaths[i].LastWriteTimeUtc = File.GetLastWriteTime(dbFilePaths[i].FilePath).ToFileTimeUtc();
+                                    _sqlite.Update_LastWriteTimeUtc(dbFilePaths[i]);
+
+                                    ConsolePrint($"[RESTORED - MODIFIED]  '{dbFilePaths[i].FilePath}' ({dbFilePaths[i].GetFileHashShort()})", MessageType.FileRestored);
+                                }
                             }
                         }
 
@@ -227,12 +225,7 @@ namespace FileHasher
                     if (DisplayPromptYesNo($"'{dbFilePaths[i].FilePath}' was deleted. Restore from db? (y/n):"))
                     {
                         filesRestored++;
-                        string targetDir = Path.GetDirectoryName(dbFilePaths[i].FilePath);
-
-                        if (!Directory.Exists(targetDir)) { Directory.CreateDirectory(targetDir); }
-
-                        string base64 = Encoding.ASCII.GetString(_sqlite.Select_Base64String(dbFilePaths[i]));
-                        File.WriteAllBytes(dbFilePaths[i].FilePath, ConvertBase64StringToBytes(base64));
+                        RestoreFile(dbFilePaths[i].FilePath, _sqlite.Select_Blob(dbFilePaths[i]));
 
                         dbFilePaths[i].LastWriteTimeUtc = File.GetLastWriteTime(dbFilePaths[i].FilePath).ToFileTimeUtc();
                         _sqlite.Update_LastWriteTimeUtc(dbFilePaths[i]);
@@ -270,39 +263,42 @@ namespace FileHasher
                     if (dbFilePaths[i].FilePath.Equals(path))
                     {
                         fileIsDeleted = false;
-                        long lastWrite = File.GetLastWriteTime(path).ToFileTimeUtc();
+                        long lastWrite = File.GetLastWriteTime(dbFilePaths[i].FilePath).ToFileTimeUtc();
 
                         // update record, if file modification time is different
                         if (dbFilePaths[i].LastWriteTimeUtc != lastWrite)
                         {
-                            if (DisplayPromptYesNo($"'{dbFilePaths[i].FilePath}' was modified. Update db? (y/n):"))
-                            {
-                                dbFilePaths[i].LastWriteTimeUtc = lastWrite;
-                                string tmpHash = CalculateHash(path);
 
-                                if (dbFilePaths[i].FileHash.Equals(tmpHash))
-                                {
-                                    filesModified++; // increase modified files counter, so that new lastWrite value is updated in db
-                                    ConsolePrint($"'{path}' has different last write timestamp, but hashes are identical");
-                                }
-                                else
+                            dbFilePaths[i].LastWriteTimeUtc = lastWrite;
+                            string tmpHash = CalculateHash(File.ReadAllBytes(dbFilePaths[i].FilePath));
+
+                            if (dbFilePaths[i].FileHash.Equals(tmpHash))
+                            {
+                                _sqlite.Update_LastWriteTimeUtc(dbFilePaths[i]);
+                                ConsolePrint($"'{dbFilePaths[i].FilePath}' has different last write timestamp, but hashes are identical");
+                            }
+                            else
+                            {
+                                if (DisplayPromptYesNo($"'{dbFilePaths[i].FilePath}' was modified. Update db? (y/n):"))
                                 {
                                     filesModified++;
                                     dbFilePaths[i].FileHash = tmpHash;
 
-                                    if (!dbFilePaths[i].HashAlgorithm.Equals(_defaultHashAlgorithm.ToString()))
+                                    if (!dbFilePaths[i].HashAlgorithm.Equals(HASH_ALGORITHM))
                                     {
-                                        ConsolePrint($"'{path}' was hashed using {dbFilePaths[i].HashAlgorithm} - update using {_defaultHashAlgorithm.ToString()}");
-                                        dbFilePaths[i].HashAlgorithm = _defaultHashAlgorithm.ToString();
+                                        ConsolePrint($"'{dbFilePaths[i].FilePath}' was hashed using {dbFilePaths[i].HashAlgorithm} - update using {HASH_ALGORITHM}");
+                                        dbFilePaths[i].HashAlgorithm = HASH_ALGORITHM;
                                     }
+                                    _sqlite.Update_FilePath(dbFilePaths[i]);
+
+                                    using (var blob = new BlobsDBModel() { FK_FilePathID = dbFilePaths[i].FilePathID, BlobData = File.ReadAllBytes(dbFilePaths[i].FilePath) })
+                                    {
+                                        // update file blob
+                                        _sqlite.Update_Blob(blob);
+                                    }
+
+                                    ConsolePrint($"[MODIFIED]  '{dbFilePaths[i].FilePath}' ({dbFilePaths[i].GetFileHashShort()})", MessageType.FileModified);
                                 }
-
-                                _sqlite.Update_FilePath(dbFilePaths[i]);
-
-                                // update file as base64 string
-                                _sqlite.Update_Base64String(new Base64StringsDBModel() { Base64String = ConvertBytesToBase64String(File.ReadAllBytes(dbFilePaths[i].FilePath)), FK_FilePathID = dbFilePaths[i].FilePathID });
-
-                                ConsolePrint($"[MODIFIED]  '{path}' ({dbFilePaths[i].GetFileHashShort()})", MessageType.FileModified);
                             }
                         }
 
@@ -317,8 +313,8 @@ namespace FileHasher
                         filesDeleted++;
                         _sqlite.Delete_FilePath(dbFilePaths[i]);
 
-                        // delete base64 string
-                        _sqlite.Delete_Base64String(dbFilePaths[i]);
+                        // delete file blob
+                        _sqlite.Delete_Blob(dbFilePaths[i]);
 
                         ConsolePrint($"[DELETED]  '{dbFilePaths[i].FilePath}' ({dbFilePaths[i].GetFileHashShort()})", MessageType.FileDeleted);
                         dbFilePaths.RemoveAt(i);
@@ -351,8 +347,8 @@ namespace FileHasher
                         {
                             FilePath = filePaths[i],
                             LastWriteTimeUtc = File.GetLastWriteTime(filePaths[i]).ToFileTimeUtc(),
-                            HashAlgorithm = _defaultHashAlgorithm.ToString(),
-                            FileHash = CalculateHash(filePaths[i])
+                            HashAlgorithm = HASH_ALGORITHM,
+                            FileHash = CalculateHash(File.ReadAllBytes(filePaths[i]))
                         });
 
                         _sqlite.Insert_FilePath(dbFilePaths.Last());
@@ -360,10 +356,13 @@ namespace FileHasher
                         // select FilePathID from last insert operation
                         int filePathID = _sqlite.Select_FilePathID(dbFilePaths.Last());
 
-                        // add file as base64 string
-                        _sqlite.Insert_Base64String(new Base64StringsDBModel() { Base64String = ConvertBytesToBase64String(File.ReadAllBytes(dbFilePaths.Last().FilePath)), FK_FilePathID = filePathID });
+                        using (var blob = new BlobsDBModel() { FK_FilePathID = filePathID, BlobData = File.ReadAllBytes(dbFilePaths.Last().FilePath) })
+                        {
+                            // write file blob to the db
+                            _sqlite.Insert_Blob(blob);
+                        }
 
-                        ConsolePrint($"[NEW]  '{filePaths[i]}' ({dbFilePaths.Last().GetFileHashShort()})", MessageType.FileNew);
+                        ConsolePrint($"[NEW]  '{dbFilePaths.Last().FilePath}' ({dbFilePaths.Last().GetFileHashShort()})", MessageType.FileNew);
                     }
                 }
             }
@@ -383,10 +382,18 @@ namespace FileHasher
 
             if (_dbUpdatePrompt)
             {
-                Console.WriteLine(message);
+                Console.Write(message);
 
-                if (Console.ReadKey(true).Key == ConsoleKey.Y) { result = true; }
-                else { result = false; }
+                if (Console.ReadKey(true).Key == ConsoleKey.Y)
+                {
+                    result = true;
+                    Console.WriteLine(" Yes");
+                }
+                else
+                {
+                    result = false;
+                    Console.WriteLine(" No");
+                }
             }
 
             return (result);
@@ -428,47 +435,32 @@ namespace FileHasher
             _logBufer.Add($"{DateTime.Now.ToString(LOG_TIMESTAMP_FORMAT).PadRight(25)} {message}");
         }
 
-        private static string ConvertBytesToBase64String(byte[] bytes) => (Convert.ToBase64String(bytes));
-
-        private static byte[] ConvertBase64StringToBytes(string base64String) => (Convert.FromBase64String(base64String));
-
-        public static string CalculateHash(string filePath)
+        private static void RestoreFile(string path, byte[] bytes)
         {
-            byte[] result = null;
+            string targetDir = Path.GetDirectoryName(path);
 
+            if (!Directory.Exists(targetDir)) { Directory.CreateDirectory(targetDir); }
+
+            File.WriteAllBytes(path, bytes);
+        }
+
+        private static string CalculateHash(string filePath)
+        {
             using (var sr = new FileStream(filePath, FileMode.Open, FileAccess.Read))
             {
-                if (_defaultHashAlgorithm == HashAlgorithm.SHA512)
+                using (var hash = SHA256.Create())
                 {
-                    using (var hash = SHA512.Create())
-                    {
-                        result = hash.ComputeHash(sr);
-                    }
-                }
-                else if (_defaultHashAlgorithm == HashAlgorithm.SHA384)
-                {
-                    using (var hash = SHA384.Create())
-                    {
-                        result = hash.ComputeHash(sr);
-                    }
-                }
-                else if (_defaultHashAlgorithm == HashAlgorithm.SHA256)
-                {
-                    using (var hash = SHA256.Create())
-                    {
-                        result = hash.ComputeHash(sr);
-                    }
-                }
-                else if (_defaultHashAlgorithm == HashAlgorithm.SHA1)
-                {
-                    using (var hash = SHA1.Create())
-                    {
-                        result = hash.ComputeHash(sr);
-                    }
+                    return (BitConverter.ToString(hash.ComputeHash(sr)).Replace("-", string.Empty).ToLower());
                 }
             }
+        }
 
-            return (BitConverter.ToString(result).Replace("-", string.Empty).ToLower());
+        private static string CalculateHash(byte[] bytes)
+        {
+            using (var hash = SHA256.Create())
+            {
+                return (BitConverter.ToString(hash.ComputeHash(bytes)).Replace("-", string.Empty).ToLower());
+            }
         }
     }
 }

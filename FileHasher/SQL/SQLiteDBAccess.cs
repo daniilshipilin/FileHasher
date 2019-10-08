@@ -12,7 +12,7 @@ namespace FileHasher.SQL
 {
     public class SQLiteDBAccess
     {
-        public const int DATABASE_VERSION = 2;
+        public const int DATABASE_VERSION = 3;
 
         readonly string _connectionString;
 
@@ -119,12 +119,12 @@ namespace FileHasher.SQL
             }
         }
 
-        public byte[] Select_Base64String(FilePathsDBModel model)
+        public byte[] Select_Blob(FilePathsDBModel model)
         {
             using (IDbConnection cnn = new SQLiteConnection(_connectionString))
             {
-                string query = "SELECT Base64String " +
-                               "FROM Base64Strings " +
+                string query = "SELECT BlobData " +
+                               "FROM Blobs " +
                                "WHERE FK_FilePathID = @FilePathID;";
 
                 var output = cnn.QuerySingle<byte[]>(query, model);
@@ -179,34 +179,34 @@ namespace FileHasher.SQL
             }
         }
 
-        public void Insert_Base64String(Base64StringsDBModel model)
+        public void Insert_Blob(BlobsDBModel model)
         {
             using (IDbConnection cnn = new SQLiteConnection(_connectionString))
             {
-                string query = "INSERT INTO Base64Strings (Base64String, FK_FilePathID) " +
-                               "VALUES (@Base64String, @FK_FilePathID);";
+                string query = "INSERT INTO Blobs (FK_FilePathID, BlobData) " +
+                               "VALUES (@FK_FilePathID, @BlobData);";
 
                 cnn.Execute(query, model);
             }
         }
 
-        public void Update_Base64String(Base64StringsDBModel model)
+        public void Update_Blob(BlobsDBModel model)
         {
             using (IDbConnection cnn = new SQLiteConnection(_connectionString))
             {
-                string query = "UPDATE Base64Strings " +
-                               "SET Base64String = @Base64String " +
+                string query = "UPDATE Blobs " +
+                               "SET BlobData = @BlobData " +
                                "WHERE FK_FilePathID = @FK_FilePathID;";
 
                 cnn.Execute(query, model);
             }
         }
 
-        public void Delete_Base64String(FilePathsDBModel model)
+        public void Delete_Blob(FilePathsDBModel model)
         {
             using (IDbConnection cnn = new SQLiteConnection(_connectionString))
             {
-                string query = "DELETE FROM Base64Strings " +
+                string query = "DELETE FROM Blobs " +
                                "WHERE FK_FilePathID = @FilePathID;";
 
                 cnn.Execute(query, model);
@@ -219,19 +219,6 @@ namespace FileHasher.SQL
             {
                 string query = "SELECT COUNT(*) " +
                                "FROM FilePaths;";
-
-                int output = cnn.ExecuteScalar<int>(query);
-
-                return (output);
-            }
-        }
-
-        public int Select_CountRecords_Base64Strings()
-        {
-            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
-            {
-                string query = "SELECT COUNT(*) " +
-                               "FROM Base64Strings;";
 
                 int output = cnn.ExecuteScalar<int>(query);
 
