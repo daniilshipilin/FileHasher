@@ -83,6 +83,7 @@
   <ItemGroup>
     <EmbeddedResource Include="costura32\SQLite.Interop.dll" />
     <EmbeddedResource Include="costura64\SQLite.Interop.dll" />
+    <Content Include="DB\FilePaths.db.sql" />
     <Content Include="FodyWeavers.xml" />
     <Content Include="hash.ico" />
   </ItemGroup>

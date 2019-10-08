@@ -111,8 +111,8 @@ namespace FileHasher
                 if (_restoreFilesFromDB) { RestoreFilesFromDB(); }
                 else { HashAndBackupFilesToDB(); }
 
-                int records = _sqlite.Select_CountRecords_FilePaths();
-                ConsolePrint($"Total file paths in db: {records}");
+                ConsolePrint($"Total file paths in DB: {_sqlite.Select_CountRecords_FilePaths()}");
+                ConsolePrint($"DB revision: {_sqlite.Select_DatabaseRevision()}");
 
                 // compact db
                 if (_dbOptimizationScheduled)

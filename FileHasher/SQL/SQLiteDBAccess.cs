@@ -12,7 +12,7 @@ namespace FileHasher.SQL
 {
     public class SQLiteDBAccess
     {
-        public const int DATABASE_VERSION = 3;
+        public const int DATABASE_VERSION = 4;
 
         readonly string _connectionString;
 
@@ -42,19 +42,7 @@ namespace FileHasher.SQL
 
         private void CheckDBVersion()
         {
-            var settings = Select_Settings();
-            bool checkPassed = false;
-
-            foreach (var setting in settings)
-            {
-                if (setting.SettingKey.Equals("DatabaseVersion"))
-                {
-                    checkPassed = (int.Parse(setting.SettingValue) == DATABASE_VERSION);
-                    break;
-                }
-            }
-
-            if (!checkPassed)
+            if (Select_DatabaseVersion() != DATABASE_VERSION)
             {
                 throw new Exception($"DB version check failed. Currently db supported version is '{DATABASE_VERSION}'.");
             }
@@ -77,6 +65,46 @@ namespace FileHasher.SQL
         }
 
         #region DB queries
+
+        private void IncrementDatabaseRevision()
+        {
+            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
+            {
+                string query = "UPDATE Settings " +
+                               "SET SettingValue = SettingValue + 1 " +
+                               "WHERE SettingKey = 'DatabaseRevision';";
+
+                cnn.Execute(query);
+            }
+        }
+
+        private int Select_DatabaseVersion()
+        {
+            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
+            {
+                string query = "SELECT SettingValue " +
+                               "FROM Settings " +
+                               "WHERE SettingKey = 'DatabaseVersion';";
+
+                int output = cnn.ExecuteScalar<int>(query);
+
+                return (output);
+            }
+        }
+
+        public int Select_DatabaseRevision()
+        {
+            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
+            {
+                string query = "SELECT SettingValue " +
+                               "FROM Settings " +
+                               "WHERE SettingKey = 'DatabaseRevision';";
+
+                int output = cnn.ExecuteScalar<int>(query);
+
+                return (output);
+            }
+        }
 
         public List<SettingsDBModel> Select_Settings()
         {
@@ -142,6 +170,8 @@ namespace FileHasher.SQL
 
                 cnn.Execute(query, model);
             }
+
+            IncrementDatabaseRevision();
         }
 
         public void Update_FilePath(FilePathsDBModel model)
@@ -154,6 +184,8 @@ namespace FileHasher.SQL
 
                 cnn.Execute(query, model);
             }
+
+            IncrementDatabaseRevision();
         }
 
         public void Update_LastWriteTimeUtc(FilePathsDBModel model)
@@ -166,6 +198,8 @@ namespace FileHasher.SQL
 
                 cnn.Execute(query, model);
             }
+
+            IncrementDatabaseRevision();
         }
 
         public void Delete_FilePath(FilePathsDBModel model)
@@ -177,6 +211,8 @@ namespace FileHasher.SQL
 
                 cnn.Execute(query, model);
             }
+
+            IncrementDatabaseRevision();
         }
 
         public void Insert_Blob(BlobsDBModel model)
@@ -188,6 +224,8 @@ namespace FileHasher.SQL
 
                 cnn.Execute(query, model);
             }
+
+            IncrementDatabaseRevision();
         }
 
         public void Update_Blob(BlobsDBModel model)
@@ -200,6 +238,8 @@ namespace FileHasher.SQL
 
                 cnn.Execute(query, model);
             }
+
+            IncrementDatabaseRevision();
         }
 
         public void Delete_Blob(FilePathsDBModel model)
@@ -211,6 +251,8 @@ namespace FileHasher.SQL
 
                 cnn.Execute(query, model);
             }
+
+            IncrementDatabaseRevision();
         }
 
         public int Select_CountRecords_FilePaths()
