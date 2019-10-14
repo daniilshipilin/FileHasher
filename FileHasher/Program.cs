@@ -76,7 +76,7 @@ namespace FileHasher
 
                 ConsolePrint(ProgramHeader);
 
-                if (args.Length >= 1) { _rootFolderPath = Path.GetFullPath(args[0]); }
+                if (args.Length >= 1) { _rootFolderPath = FormatPath(args[0]); }
 
                 if (args.Length >= 2) { _fileExtensions = args[1].Split(','); }
 
@@ -96,6 +96,9 @@ namespace FileHasher
                 {
                     throw new DirectoryNotFoundException($"Directory '{_rootFolderPath}' doesn't exist");
                 }
+
+                // set root folder path in the FilePathsDBModel class
+                FilePathsDBModel.SetRootFolderPath(_rootFolderPath);
 
                 // print args
                 ConsolePrint($"Root folder path = {_rootFolderPath}");
@@ -145,12 +148,6 @@ namespace FileHasher
                         ConsolePrint($"Folder cleanup deleted files: {cleanupFilesDeleted}");
                     }
                 }
-
-                if (_waitBeforeExit)
-                {
-                    Console.WriteLine("Press ENTER to exit");
-                    Console.ReadLine();
-                }
             }
             catch (Exception ex)
             {
@@ -167,6 +164,12 @@ namespace FileHasher
                 {
                     Console.WriteLine(ex.ToString());
                 }
+            }
+
+            if (_waitBeforeExit)
+            {
+                Console.WriteLine("Press ENTER to exit");
+                Console.ReadLine();
             }
         }
 
@@ -185,33 +188,33 @@ namespace FileHasher
 
                 foreach (var path in filePaths)
                 {
-                    if (dbFilePaths[i].FilePath.Equals(path))
+                    if (dbFilePaths[i].FileFullPath.Equals(path))
                     {
                         fileDeleted = false;
-                        long lastWrite = File.GetLastWriteTime(dbFilePaths[i].FilePath).ToFileTimeUtc();
+                        long lastWrite = File.GetLastWriteTime(dbFilePaths[i].FileFullPath).ToFileTimeUtc();
 
                         if (dbFilePaths[i].LastWriteTimeUtc != lastWrite)
                         {
                             dbFilePaths[i].LastWriteTimeUtc = lastWrite;
-                            string tmpHash = CalculateHash(File.ReadAllBytes(dbFilePaths[i].FilePath));
+                            string tmpHash = CalculateHash(File.ReadAllBytes(dbFilePaths[i].FileFullPath));
 
                             if (dbFilePaths[i].FileHash.Equals(tmpHash))
                             {
                                 _sqlite.Update_LastWriteTimeUtc(dbFilePaths[i]);
-                                ConsolePrint($"'{dbFilePaths[i].FilePath}' has different last write timestamp, but hashes are identical");
+                                ConsolePrint($"'{dbFilePaths[i].FileFullPath}' has different last write timestamp, but hashes are identical");
                             }
                             else
                             {
-                                if (DisplayPromptYesNo($"'{dbFilePaths[i].FilePath}' was modified. Restore from db? (y/n):"))
+                                if (DisplayPromptYesNo($"'{dbFilePaths[i].FileFullPath}' was modified. Restore from db? (y/n):"))
                                 {
                                     filesRestored++;
-                                    RestoreFile(dbFilePaths[i].FilePath, _sqlite.Select_Blob(dbFilePaths[i]));
+                                    RestoreFile(dbFilePaths[i].FileFullPath, _sqlite.Select_Blob(dbFilePaths[i]));
 
                                     // update last write timestamp
-                                    dbFilePaths[i].LastWriteTimeUtc = File.GetLastWriteTime(dbFilePaths[i].FilePath).ToFileTimeUtc();
+                                    dbFilePaths[i].LastWriteTimeUtc = File.GetLastWriteTime(dbFilePaths[i].FileFullPath).ToFileTimeUtc();
                                     _sqlite.Update_LastWriteTimeUtc(dbFilePaths[i]);
 
-                                    ConsolePrint($"[RESTORED - MODIFIED]  '{dbFilePaths[i].FilePath}' ({dbFilePaths[i].GetFileHashShort()})", MessageType.FileRestored);
+                                    ConsolePrint($"[RESTORED - MODIFIED]  '{dbFilePaths[i].FileFullPath}' ({dbFilePaths[i].FileHashShort})", MessageType.FileRestored);
                                 }
                             }
                         }
@@ -222,15 +225,15 @@ namespace FileHasher
 
                 if (fileDeleted)
                 {
-                    if (DisplayPromptYesNo($"'{dbFilePaths[i].FilePath}' was deleted. Restore from db? (y/n):"))
+                    if (DisplayPromptYesNo($"'{dbFilePaths[i].FileFullPath}' was deleted. Restore from db? (y/n):"))
                     {
                         filesRestored++;
-                        RestoreFile(dbFilePaths[i].FilePath, _sqlite.Select_Blob(dbFilePaths[i]));
+                        RestoreFile(dbFilePaths[i].FileFullPath, _sqlite.Select_Blob(dbFilePaths[i]));
 
-                        dbFilePaths[i].LastWriteTimeUtc = File.GetLastWriteTime(dbFilePaths[i].FilePath).ToFileTimeUtc();
+                        dbFilePaths[i].LastWriteTimeUtc = File.GetLastWriteTime(dbFilePaths[i].FileFullPath).ToFileTimeUtc();
                         _sqlite.Update_LastWriteTimeUtc(dbFilePaths[i]);
 
-                        ConsolePrint($"[RESTORED - DELETED]  '{dbFilePaths[i].FilePath}' ({dbFilePaths[i].GetFileHashShort()})", MessageType.FileRestored);
+                        ConsolePrint($"[RESTORED - DELETED]  '{dbFilePaths[i].FileFullPath}' ({dbFilePaths[i].FileHashShort})", MessageType.FileRestored);
                     }
                 }
             }
@@ -260,44 +263,43 @@ namespace FileHasher
 
                 foreach (var path in filePaths)
                 {
-                    if (dbFilePaths[i].FilePath.Equals(path))
+                    if (dbFilePaths[i].FileFullPath.Equals(path))
                     {
                         fileIsDeleted = false;
-                        long lastWrite = File.GetLastWriteTime(dbFilePaths[i].FilePath).ToFileTimeUtc();
+                        long lastWrite = File.GetLastWriteTime(dbFilePaths[i].FileFullPath).ToFileTimeUtc();
 
                         // update record, if file modification time is different
                         if (dbFilePaths[i].LastWriteTimeUtc != lastWrite)
                         {
-
                             dbFilePaths[i].LastWriteTimeUtc = lastWrite;
-                            string tmpHash = CalculateHash(File.ReadAllBytes(dbFilePaths[i].FilePath));
+                            string tmpHash = CalculateHash(File.ReadAllBytes(dbFilePaths[i].FileFullPath));
 
                             if (dbFilePaths[i].FileHash.Equals(tmpHash))
                             {
                                 _sqlite.Update_LastWriteTimeUtc(dbFilePaths[i]);
-                                ConsolePrint($"'{dbFilePaths[i].FilePath}' has different last write timestamp, but hashes are identical");
+                                ConsolePrint($"'{dbFilePaths[i].FileFullPath}' has different last write timestamp, but hashes are identical");
                             }
                             else
                             {
-                                if (DisplayPromptYesNo($"'{dbFilePaths[i].FilePath}' was modified. Update db? (y/n):"))
+                                if (DisplayPromptYesNo($"'{dbFilePaths[i].FileFullPath}' was modified. Update db? (y/n):"))
                                 {
                                     filesModified++;
                                     dbFilePaths[i].FileHash = tmpHash;
 
                                     if (!dbFilePaths[i].HashAlgorithm.Equals(HASH_ALGORITHM))
                                     {
-                                        ConsolePrint($"'{dbFilePaths[i].FilePath}' was hashed using {dbFilePaths[i].HashAlgorithm} - update using {HASH_ALGORITHM}");
+                                        ConsolePrint($"'{dbFilePaths[i].FileFullPath}' was hashed using {dbFilePaths[i].HashAlgorithm} - update using {HASH_ALGORITHM}");
                                         dbFilePaths[i].HashAlgorithm = HASH_ALGORITHM;
                                     }
                                     _sqlite.Update_FilePath(dbFilePaths[i]);
 
-                                    using (var blob = new BlobsDBModel() { FK_FilePathID = dbFilePaths[i].FilePathID, BlobData = File.ReadAllBytes(dbFilePaths[i].FilePath) })
+                                    using (var blob = new BlobsDBModel() { FK_FilePathID = dbFilePaths[i].FilePathID, BlobData = File.ReadAllBytes(dbFilePaths[i].FileFullPath) })
                                     {
                                         // update file blob
                                         _sqlite.Update_Blob(blob);
                                     }
 
-                                    ConsolePrint($"[MODIFIED]  '{dbFilePaths[i].FilePath}' ({dbFilePaths[i].GetFileHashShort()})", MessageType.FileModified);
+                                    ConsolePrint($"[MODIFIED]  '{dbFilePaths[i].FileFullPath}' ({dbFilePaths[i].FileHashShort})", MessageType.FileModified);
                                 }
                             }
                         }
@@ -308,7 +310,7 @@ namespace FileHasher
 
                 if (fileIsDeleted)
                 {
-                    if (DisplayPromptYesNo($"'{dbFilePaths[i].FilePath}' was deleted. Update db? (y/n):"))
+                    if (DisplayPromptYesNo($"'{dbFilePaths[i].FileFullPath}' was deleted. Update db? (y/n):"))
                     {
                         filesDeleted++;
                         _sqlite.Delete_FilePath(dbFilePaths[i]);
@@ -316,7 +318,7 @@ namespace FileHasher
                         // delete file blob
                         _sqlite.Delete_Blob(dbFilePaths[i]);
 
-                        ConsolePrint($"[DELETED]  '{dbFilePaths[i].FilePath}' ({dbFilePaths[i].GetFileHashShort()})", MessageType.FileDeleted);
+                        ConsolePrint($"[DELETED]  '{dbFilePaths[i].FileFullPath}' ({dbFilePaths[i].FileHashShort})", MessageType.FileDeleted);
                         dbFilePaths.RemoveAt(i);
                         i--; // decreasing index, because of previosly deleted element
                     }
@@ -330,7 +332,7 @@ namespace FileHasher
 
                 foreach (var record in dbFilePaths)
                 {
-                    if (filePaths[i].Equals(record.FilePath))
+                    if (filePaths[i].Equals(record.FileFullPath))
                     {
                         fileIsNew = false;
                         break;
@@ -345,7 +347,7 @@ namespace FileHasher
 
                         dbFilePaths.Add(new FilePathsDBModel()
                         {
-                            FilePath = filePaths[i],
+                            FilePath = RemovePathRootFromPath(filePaths[i]),
                             LastWriteTimeUtc = File.GetLastWriteTime(filePaths[i]).ToFileTimeUtc(),
                             HashAlgorithm = HASH_ALGORITHM,
                             FileHash = CalculateHash(File.ReadAllBytes(filePaths[i]))
@@ -356,13 +358,13 @@ namespace FileHasher
                         // select FilePathID from last insert operation
                         int filePathID = _sqlite.Select_FilePathID(dbFilePaths.Last());
 
-                        using (var blob = new BlobsDBModel() { FK_FilePathID = filePathID, BlobData = File.ReadAllBytes(dbFilePaths.Last().FilePath) })
+                        using (var blob = new BlobsDBModel() { FK_FilePathID = filePathID, BlobData = File.ReadAllBytes(dbFilePaths.Last().FileFullPath) })
                         {
                             // write file blob to the db
                             _sqlite.Insert_Blob(blob);
                         }
 
-                        ConsolePrint($"[NEW]  '{dbFilePaths.Last().FilePath}' ({dbFilePaths.Last().GetFileHashShort()})", MessageType.FileNew);
+                        ConsolePrint($"[NEW]  '{dbFilePaths.Last().FileFullPath}' ({dbFilePaths.Last().FileHashShort})", MessageType.FileNew);
                     }
                 }
             }
@@ -374,6 +376,32 @@ namespace FileHasher
                 if (filesNew > 0) { ConsolePrint($"Files new: {filesNew}"); }
             }
             else { ConsolePrint("Update not required"); }
+        }
+
+        private static string FormatPath(string path)
+        {
+            string[] split = Path.GetFullPath(path).Split(new char[] { Path.DirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+            var sb = new StringBuilder();
+
+            for (int i = 0; i < split.Length; i++)
+            {
+                sb.Append(split[i]);
+
+                if (i < split.Length - 1 || i == 0)
+                {
+                    sb.Append(Path.DirectorySeparatorChar);
+                }
+            }
+
+            return (sb.ToString());
+        }
+
+        private static string RemovePathRootFromPath(string path)
+        {
+            // full path string 'C:\Music\Chipzel\Super Hexagon\01 - Courtesy.mp3'
+            // path root string 'C:\Music'
+            // return string 'Chipzel\Super Hexagon\01 - Courtesy.mp3'
+            return (path.Substring(_rootFolderPath.Length + 1));
         }
 
         private static bool DisplayPromptYesNo(string message)
