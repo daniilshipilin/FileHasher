@@ -97,6 +97,9 @@ namespace FileHasher
 
         static int Main(string[] args)
         {
+            // set console output encoding
+            Console.OutputEncoding = Encoding.Unicode;
+
             try
             {
                 // parse args
