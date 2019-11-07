@@ -64,218 +64,203 @@ namespace FileHasher.SQL
             return (connectionString);
         }
 
-        #region DB queries
-
-        private void IncrementDatabaseRevision()
-        {
-            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
-            {
-                string query = "UPDATE Settings " +
-                               "SET SettingValue = SettingValue + 1 " +
-                               "WHERE SettingKey = 'DatabaseRevision';";
-
-                cnn.Execute(query);
-            }
-        }
+        #region SELECT queries
 
         private int Select_DatabaseVersion()
         {
-            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
-            {
-                string query = "SELECT SettingValue " +
-                               "FROM Settings " +
-                               "WHERE SettingKey = 'DatabaseVersion';";
+            using IDbConnection cnn = new SQLiteConnection(_connectionString);
 
-                int output = cnn.ExecuteScalar<int>(query);
+            string query = "SELECT SettingValue " +
+                           "FROM Settings " +
+                           "WHERE SettingKey = 'DatabaseVersion';";
 
-                return (output);
-            }
+            int output = cnn.ExecuteScalar<int>(query);
+
+            return (output);
         }
 
         public int Select_DatabaseRevision()
         {
-            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
-            {
-                string query = "SELECT SettingValue " +
-                               "FROM Settings " +
-                               "WHERE SettingKey = 'DatabaseRevision';";
+            using IDbConnection cnn = new SQLiteConnection(_connectionString);
 
-                int output = cnn.ExecuteScalar<int>(query);
+            string query = "SELECT SettingValue " +
+                           "FROM Settings " +
+                           "WHERE SettingKey = 'DatabaseRevision';";
 
-                return (output);
-            }
+            int output = cnn.ExecuteScalar<int>(query);
+
+            return (output);
         }
 
         public List<SettingsDBModel> Select_Settings()
         {
-            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
-            {
-                string query = "SELECT * " +
-                               "FROM Settings;";
+            using IDbConnection cnn = new SQLiteConnection(_connectionString);
 
-                var output = cnn.Query<SettingsDBModel>(query);
+            string query = "SELECT * " +
+                           "FROM Settings;";
 
-                return (output.ToList());
-            }
+            var output = cnn.Query<SettingsDBModel>(query);
+
+            return (output.ToList());
         }
 
         public List<FilePathsDBModel> Select_FilePaths()
         {
-            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
-            {
-                string query = "SELECT * " +
-                               "FROM FilePaths " +
-                               "ORDER BY FilePath ASC;";
+            using IDbConnection cnn = new SQLiteConnection(_connectionString);
 
-                var output = cnn.Query<FilePathsDBModel>(query);
+            string query = "SELECT * " +
+                           "FROM FilePaths " +
+                           "ORDER BY FilePath ASC;";
 
-                return (output.ToList());
-            }
+            var output = cnn.Query<FilePathsDBModel>(query);
+
+            return (output.ToList());
         }
 
         public int Select_FilePathID(FilePathsDBModel model)
         {
-            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
-            {
-                string query = "SELECT FilePathID " +
-                               "FROM FilePaths " +
-                               "WHERE FilePath = @FilePath;";
+            using IDbConnection cnn = new SQLiteConnection(_connectionString);
 
-                int output = cnn.ExecuteScalar<int>(query, model);
+            string query = "SELECT FilePathID " +
+                           "FROM FilePaths " +
+                           "WHERE FilePath = @FilePath;";
 
-                return (output);
-            }
+            int output = cnn.ExecuteScalar<int>(query, model);
+
+            return (output);
         }
 
         public byte[] Select_Blob(FilePathsDBModel model)
         {
-            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
-            {
-                string query = "SELECT BlobData " +
-                               "FROM Blobs " +
-                               "WHERE FK_FilePathID = @FilePathID;";
+            using IDbConnection cnn = new SQLiteConnection(_connectionString);
 
-                var output = cnn.QuerySingle<byte[]>(query, model);
+            string query = "SELECT BlobData " +
+                           "FROM Blobs " +
+                           "WHERE FK_FilePathID = @FilePathID;";
 
-                return (output);
-            }
+            var output = cnn.QuerySingle<byte[]>(query, model);
+
+            return (output);
         }
+
+        public int Select_CountRecords_FilePaths()
+        {
+            using IDbConnection cnn = new SQLiteConnection(_connectionString);
+
+            string query = "SELECT COUNT(*) " +
+                           "FROM FilePaths;";
+
+            int output = cnn.ExecuteScalar<int>(query);
+
+            return (output);
+        }
+
+        #endregion
+
+        #region UPDATE/INSERT queries
 
         public void Insert_FilePath(FilePathsDBModel model)
         {
-            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
-            {
-                string query = "INSERT INTO FilePaths (FilePath, LastWriteTimeUtc, HashAlgorithm, FileHash) " +
-                               "VALUES (@FilePath, @LastWriteTimeUtc, @HashAlgorithm, @FileHash);";
+            using IDbConnection cnn = new SQLiteConnection(_connectionString);
 
-                cnn.Execute(query, model);
-            }
+            string query = "INSERT INTO FilePaths (FilePath, LastWriteTimeUtc, HashAlgorithm, FileHash) " +
+                           "VALUES (@FilePath, @LastWriteTimeUtc, @HashAlgorithm, @FileHash);";
 
+            cnn.Execute(query, model);
             IncrementDatabaseRevision();
         }
 
         public void Update_FilePath(FilePathsDBModel model)
         {
-            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
-            {
-                string query = "UPDATE FilePaths " +
-                               "SET FilePath = @FilePath, LastWriteTimeUtc = @LastWriteTimeUtc, HashAlgorithm = @HashAlgorithm, FileHash = @FileHash " +
-                               "WHERE FilePathID = @FilePathID;";
+            using IDbConnection cnn = new SQLiteConnection(_connectionString);
 
-                cnn.Execute(query, model);
-            }
+            string query = "UPDATE FilePaths " +
+                           "SET FilePath = @FilePath, LastWriteTimeUtc = @LastWriteTimeUtc, HashAlgorithm = @HashAlgorithm, FileHash = @FileHash " +
+                           "WHERE FilePathID = @FilePathID;";
 
+            cnn.Execute(query, model);
             IncrementDatabaseRevision();
         }
 
         public void Update_LastWriteTimeUtc(FilePathsDBModel model)
         {
-            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
-            {
-                string query = "UPDATE FilePaths " +
-                               "SET LastWriteTimeUtc = @LastWriteTimeUtc " +
-                               "WHERE FilePathID = @FilePathID;";
+            using IDbConnection cnn = new SQLiteConnection(_connectionString);
 
-                cnn.Execute(query, model);
-            }
+            string query = "UPDATE FilePaths " +
+                           "SET LastWriteTimeUtc = @LastWriteTimeUtc " +
+                           "WHERE FilePathID = @FilePathID;";
 
+            cnn.Execute(query, model);
             IncrementDatabaseRevision();
         }
 
         public void Delete_FilePath(FilePathsDBModel model)
         {
-            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
-            {
-                string query = "DELETE FROM FilePaths " +
-                               "WHERE FilePathID = @FilePathID;";
+            using IDbConnection cnn = new SQLiteConnection(_connectionString);
 
-                cnn.Execute(query, model);
-            }
+            string query = "DELETE FROM FilePaths " +
+                           "WHERE FilePathID = @FilePathID;";
 
+            cnn.Execute(query, model);
             IncrementDatabaseRevision();
         }
 
         public void Insert_Blob(BlobsDBModel model)
         {
-            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
-            {
-                string query = "INSERT INTO Blobs (FK_FilePathID, BlobData) " +
-                               "VALUES (@FK_FilePathID, @BlobData);";
+            using IDbConnection cnn = new SQLiteConnection(_connectionString);
 
-                cnn.Execute(query, model);
-            }
+            string query = "INSERT INTO Blobs (FK_FilePathID, BlobData) " +
+                           "VALUES (@FK_FilePathID, @BlobData);";
 
+            cnn.Execute(query, model);
             IncrementDatabaseRevision();
         }
 
         public void Update_Blob(BlobsDBModel model)
         {
-            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
-            {
-                string query = "UPDATE Blobs " +
-                               "SET BlobData = @BlobData " +
-                               "WHERE FK_FilePathID = @FK_FilePathID;";
+            using IDbConnection cnn = new SQLiteConnection(_connectionString);
 
-                cnn.Execute(query, model);
-            }
+            string query = "UPDATE Blobs " +
+                           "SET BlobData = @BlobData " +
+                           "WHERE FK_FilePathID = @FK_FilePathID;";
 
+            cnn.Execute(query, model);
             IncrementDatabaseRevision();
         }
 
         public void Delete_Blob(FilePathsDBModel model)
         {
-            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
-            {
-                string query = "DELETE FROM Blobs " +
-                               "WHERE FK_FilePathID = @FilePathID;";
+            using IDbConnection cnn = new SQLiteConnection(_connectionString);
 
-                cnn.Execute(query, model);
-            }
+            string query = "DELETE FROM Blobs " +
+                           "WHERE FK_FilePathID = @FilePathID;";
 
+            cnn.Execute(query, model);
             IncrementDatabaseRevision();
         }
 
-        public int Select_CountRecords_FilePaths()
+        #endregion
+
+        #region DB specialized queries
+
+        private void IncrementDatabaseRevision()
         {
-            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
-            {
-                string query = "SELECT COUNT(*) " +
-                               "FROM FilePaths;";
+            using IDbConnection cnn = new SQLiteConnection(_connectionString);
 
-                int output = cnn.ExecuteScalar<int>(query);
+            string query = "UPDATE Settings " +
+                           "SET SettingValue = SettingValue + 1 " +
+                           "WHERE SettingKey = 'DatabaseRevision';";
 
-                return (output);
-            }
+            cnn.Execute(query);
         }
 
         public void CompactDatabase()
         {
-            using (IDbConnection cnn = new SQLiteConnection(_connectionString))
-            {
-                string query = "VACUUM main;";
+            using IDbConnection cnn = new SQLiteConnection(_connectionString);
 
-                cnn.Execute(query);
-            }
+            string query = "VACUUM main;";
+
+            cnn.Execute(query);
         }
 
         #endregion

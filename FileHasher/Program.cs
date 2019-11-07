@@ -218,8 +218,11 @@ namespace FileHasher
             {
                 try
                 {
-                    // write log file
-                    File.AppendAllLines(_logFilePath, LogBuffer, new UTF8Encoding(false));
+                    if (LogBuffer.Count != 0)
+                    {
+                        // write log file
+                        File.AppendAllLines(_logFilePath, LogBuffer, new UTF8Encoding(false));
+                    }
                 }
                 catch (Exception ex)
                 {

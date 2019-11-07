@@ -53,13 +53,9 @@ namespace FileHasher.Models
 
         public void CalculateHash()
         {
-            using (var fs = new FileStream(FileFullPath, FileMode.Open, FileAccess.Read))
-            {
-                using (var hash = SHA256.Create())
-                {
-                    FileHash = BitConverter.ToString(hash.ComputeHash(fs)).Replace("-", string.Empty).ToLower();
-                }
-            }
+            using var fs = new FileStream(FileFullPath, FileMode.Open, FileAccess.Read);
+            using var hash = SHA256.Create();
+            FileHash = BitConverter.ToString(hash.ComputeHash(fs)).Replace("-", string.Empty).ToLower();
         }
     }
 }
