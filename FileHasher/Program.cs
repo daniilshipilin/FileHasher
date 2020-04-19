@@ -574,15 +574,6 @@ namespace FileHasher
 
         private static void ConsolePrint(string message, MessageType messageType = MessageType.DEFAULT)
         {
-            if (messageType != MessageType.DEFAULT)
-            {
-                if (messageType == MessageType.EXCEPTION)
-                {
-                    Console.BackgroundColor = ConsoleColor.DarkRed;
-                    Console.ForegroundColor = ConsoleColor.Yellow;
-                }
-            }
-
             if (messageType == MessageType.DEFAULT)
             {
                 Console.WriteLine(message);
@@ -590,11 +581,23 @@ namespace FileHasher
             }
             else
             {
+                // set console output color first
+                if (messageType == MessageType.EXCEPTION)
+                {
+                    Console.BackgroundColor = ConsoleColor.DarkRed;
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                }
+
+                // then print the message
                 Console.WriteLine($"{messageType} {message}");
                 LogBuffer.Add($"{DateTime.Now.ToString(LOG_TIMESTAMP_FORMAT),-25} {messageType,-15} {message}");
-            }
 
-            Console.ResetColor();
+                // finally, reset the console colors
+                if (messageType == MessageType.EXCEPTION)
+                {
+                    Console.ResetColor();
+                }
+            }
         }
 
         private static void RestoreFile(string path, byte[] bytes)
