@@ -4,4 +4,4 @@ using System.Reflection;
 [assembly: AssemblyDescription("FileHasher")]
 [assembly: AssemblyProduct("FileHasher")]
 [assembly: AssemblyCopyright("Daniil Shipilin")]
-[assembly: AssemblyVersion("0.1.2")]
+[assembly: AssemblyVersion("0.1.3")]
