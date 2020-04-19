@@ -586,12 +586,12 @@ namespace FileHasher
             if (messageType == MessageType.DEFAULT)
             {
                 Console.WriteLine(message);
-                LogBuffer.Add($"{DateTime.Now.ToString(LOG_TIMESTAMP_FORMAT),25} {string.Empty,15} {message}");
+                LogBuffer.Add($"{DateTime.Now.ToString(LOG_TIMESTAMP_FORMAT),-25} {string.Empty,-15} {message}");
             }
             else
             {
                 Console.WriteLine($"{messageType} {message}");
-                LogBuffer.Add($"{DateTime.Now.ToString(LOG_TIMESTAMP_FORMAT),25} {messageType,15} {message}");
+                LogBuffer.Add($"{DateTime.Now.ToString(LOG_TIMESTAMP_FORMAT),-25} {messageType,-15} {message}");
             }
 
             Console.ResetColor();
