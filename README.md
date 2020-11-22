@@ -2,6 +2,6 @@
 
 # FileHasher
 
-### Author: Daniil Shipilin (daniil.shipilin@gmail.com)
+### Author: Daniil Shipilin
 
 Backups entire folder structure using file hashes as a reference.
